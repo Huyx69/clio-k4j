@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Clio K4J</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Tableau de bord de nuit : une seule ambiance sombre, accent orange de l'afficheur Renault d'époque.
+   Haut : état de la liaison. Centre : grosse conso. Grille : capteurs. Bas : onglets. */
+:root{
+  --bg:#0b0d10; --panel:#14171c; --line:#252a31; --fg:#e9e6e1; --muted:#8a8f97;
+  --lcd:#ff6b2c; --ok:#4cc38a; --warn:#f2b33d; --bad:#ef5350;
+  --f-num:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-ui:"Barlow",system-ui,-apple-system,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 var(--f-ui);-webkit-tap-highlight-color:transparent;
+  padding-top:env(safe-area-inset-top,0px)}
+button,input{font:inherit;color:inherit}
+.app{display:flex;flex-direction:column;min-height:100%;padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))}
+.wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header{display:flex;align-items:center;gap:10px;padding-block:12px;border-bottom:1px solid var(--line)}
+.brand{font:700 20px/1 var(--f-num);letter-spacing:.04em;text-transform:uppercase}
+.brand small{display:block;font:500 11px/1.3 var(--f-ui);color:var(--muted);letter-spacing:.08em}
+.pill{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  padding:5px 10px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.pill.on{color:var(--ok)} .pill.on i{background:var(--ok)}
+.pill.busy{color:var(--warn)} .pill.busy i{background:var(--warn);animation:blink 1s infinite}
+.pill.err{color:var(--bad)} .pill.err i{background:var(--bad)}
+@keyframes blink{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.pill.busy i{animation:none}}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:12px 16px;font-weight:600;cursor:pointer}
+.btn.main{background:var(--lcd);border-color:var(--lcd);color:#1a0d05}
+.btn.danger{border-color:var(--bad);color:var(--bad)}
+.btn.danger.armed{background:var(--bad);color:#fff}
+.btn:disabled{opacity:.4}
+.btn:focus-visible,.tab:focus-visible,input:focus-visible{outline:2px solid var(--lcd);outline-offset:2px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row .btn{flex:1 1 140px}
+section{display:flex;flex-direction:column;gap:14px;padding-block:16px}
+.msg{font-size:13px;color:var(--muted);min-height:1.4em}
+.msg.bad{color:var(--bad)}
+
+/* Conso héros */
+.lcd{background:linear-gradient(#1a0f09,#120b07);border:1px solid #3a2213;border-radius:14px;padding:14px 16px;display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:end}
+.lcd .big{font:700 clamp(64px,22vw,110px)/.85 var(--f-num);color:var(--lcd);font-variant-numeric:tabular-nums;text-shadow:0 0 18px rgba(255,107,44,.35)}
+.lcd .unit{font:600 14px var(--f-num);color:#c4794e;letter-spacing:.08em;text-transform:uppercase}
+.lcd .side{text-align:right;display:flex;flex-direction:column;gap:8px}
+.lcd .side b{display:block;font:600 30px/1 var(--f-num);color:var(--lcd);font-variant-numeric:tabular-nums}
+.lcd .side span{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#c4794e}
+.rpmbar{grid-column:1/-1;height:8px;border-radius:4px;background:#2a1a10;overflow:hidden;margin-top:8px}
+.rpmbar div{height:100%;width:0;background:var(--lcd);transition:width .2s}
+.rpmbar.red div{background:var(--bad)}
+
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;min-width:0}
+.tile span{display:block;font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile b{font:600 26px/1.1 var(--f-num);font-variant-numeric:tabular-nums}
+.tile small{color:var(--muted);font-size:12px;margin-left:2px}
+.tile.warn b{color:var(--warn)} .tile.bad b{color:var(--bad)}
+.trip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center}
+.trip b{display:block;font:600 22px/1.1 var(--f-num);font-variant-numeric:tabular-nums}
+.trip span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+
+h2{font:700 22px/1.1 var(--f-num);text-transform:uppercase;letter-spacing:.04em;margin:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.mil{display:flex;align-items:center;gap:12px;font-weight:600}
+.mil svg{flex:none}
+.dtc{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:baseline}
+.dtc b{font:700 20px var(--f-num);color:var(--warn)}
+.list{display:flex;flex-direction:column}
+.list .it{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 0;border-bottom:1px solid var(--line);background:none;border-left:0;border-right:0;border-top:0;text-align:left;cursor:pointer}
+.list .it small{color:var(--muted)}
+.list .it b{font:600 20px var(--f-num);font-variant-numeric:tabular-nums;text-align:right}
+label{font-size:13px;color:var(--muted)}
+#iLitres{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;font:600 26px var(--f-num)}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-variant-numeric:tabular-nums}
+.kv span{color:var(--muted)}
+canvas{width:100%;height:auto;display:block;background:var(--bg);border-radius:8px}
+.demo{font-size:11px;color:var(--warn);letter-spacing:.06em;text-transform:uppercase}
+
+nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);background:var(--panel);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
+.tab{background:none;border:0;padding:14px 4px;font:600 15px var(--f-num);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);cursor:pointer}
+.tab.on{color:var(--lcd);box-shadow:inset 0 2px 0 var(--lcd)}
+@media (min-width:640px){.app{max-width:640px;margin:0 auto}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="wrap">
+    <div class="brand">Clio 2 · K4J<small>1.4 16V · 2001-2003</small></div>
+    <div class="pill" id="pill"><i></i><span id="pillTxt">Déconnecté</span></div>
+  </header>
+
+  <!-- ROUTE -->
+  <section class="wrap" id="v-route">
+    <div class="row" id="connRow">
+      <button class="btn main" id="bConnect">Connecter le boîtier</button>
+      <button class="btn" id="bDemo">Essayer sans voiture</button>
+    </div>
+    <div class="msg" id="msg">Contact mis, boîtier branché, puis « Connecter ». Ferme Car Scanner avant : le boîtier n'accepte qu'une app à la fois.</div>
+
+    <div class="lcd">
+      <div><div class="big" id="lInst">--.-</div><div class="unit" id="lInstU">L/100 km instantané</div></div>
+      <div class="side">
+        <div><b id="lMoy">--.-</b><span>moy. trajet</span></div>
+        <div><b id="lVit">0</b><span>km/h</span></div>
+      </div>
+      <div class="rpmbar" id="rpmBar"><div></div></div>
+    </div>
+
+    <div class="grid">
+      <div class="tile"><span>Régime</span><b id="tRpm">--</b><small>tr/min</small></div>
+      <div class="tile" id="tileEau"><span>Eau</span><b id="tEau">--</b><small>°C</small></div>
+      <div class="tile" id="tileBat"><span>Batterie</span><b id="tBat">--</b><small>V</small></div>
+      <div class="tile"><span>Admission</span><b id="tMap">--</b><small>kPa</small></div>
+      <div class="tile"><span>Papillon</span><b id="tPap">--</b><small>%</small></div>
+      <div class="tile"><span>Charge</span><b id="tCharge">--</b><small>%</small></div>
+      <div class="tile"><span>Air admis</span><b id="tAir">--</b><small>°C</small></div>
+      <div class="tile"><span>Avance</span><b id="tAv">--</b><small>°</small></div>
+      <div class="tile"><span>Sonde O2</span><b id="tO2">--</b><small>V</small></div>
+      <div class="tile"><span>Corr. courte</span><b id="tStft">--</b><small>%</small></div>
+      <div class="tile"><span>Corr. longue</span><b id="tLtft">--</b><small>%</small></div>
+      <div class="tile"><span>Débit</span><b id="tLh">--</b><small>L/h</small></div>
+    </div>
+
+    <div class="card">
+      <div class="trip">
+        <div><b id="sKm">0.0</b><span>km</span></div>
+        <div><b id="sL">0.00</b><span>litres</span></div>
+        <div><b id="sT">0:00</b><span>durée</span></div>
+        <div><b id="sMax">0</b><span>tr/min max</span></div>
+      </div>
+      <button class="btn" id="bStop" disabled>Terminer le trajet</button>
+    </div>
+  </section>
+
+  <!-- DIAG -->
+  <section class="wrap" id="v-diag" hidden>
+    <h2>Codes défaut moteur</h2>
+    <div class="card" id="diagOut"><div class="msg">Connecte le boîtier puis lance la lecture.</div></div>
+    <div class="row">
+      <button class="btn main" id="bRead">Lire les codes</button>
+      <button class="btn danger" id="bClear">Effacer les codes</button>
+    </div>
+    <div class="msg" id="diagMsg">Effacer éteint le voyant mais ne répare rien : si la panne est toujours là, le code revient. Pour effacer : moteur coupé, contact mis.</div>
+  </section>
+
+  <!-- PLEINS -->
+  <section class="wrap" id="v-plein" hidden>
+    <h2>Plein & calibration</h2>
+    <div class="card">
+      <label for="iLitres">Litres affichés sur la pompe (plein fait à ras)</label>
+      <input type="text" id="iLitres" inputmode="decimal" autocomplete="off" placeholder="38,50">
+      <button class="btn main" id="bPlein">Enregistrer le plein</button>
+      <div class="msg" id="pleinMsg"></div>
+    </div>
+    <div class="card">
+      <div class="kv" id="calib"></div>
+    </div>
+    <div class="list" id="pleinList"></div>
+    <div class="msg">La conso est calculée à partir de la pression d'admission (ton moteur n'a pas de débitmètre). À chaque plein, l'app compare son calcul à la pompe et se corrige. Enregistre bien tous tes trajets entre deux pleins.</div>
+  </section>
+
+  <!-- TRAJETS -->
+  <section class="wrap" id="v-trajets" hidden>
+    <h2>Trajets</h2>
+    <div class="card" id="tripDetail" hidden></div>
+    <div class="list" id="tripList"></div>
+    <div class="row">
+      <button class="btn" id="bBackup">Exporter la sauvegarde</button>
+      <button class="btn" id="bRestore">Importer une sauvegarde</button>
+      <input type="file" id="fRestore" accept=".json,application/json" hidden>
+    </div>
+    <div class="msg" id="backupMsg">Tes données restent dans ce navigateur. Exporte une sauvegarde de temps en temps.</div>
+  </section>
+</div>
+
+<nav>
+  <button class="tab on" data-v="route">Route</button>
+  <button class="tab" data-v="diag">Diag</button>
+  <button class="tab" data-v="plein">Pleins</button>
+  <button class="tab" data-v="trajets">Trajets</button>
+</nav>
+
+<script>
+"use strict";
+/* ───────── Moteur K4J 1.4 16v ───────── */
+const K4J={cyl:1.390, ve:0.80, afr:14.7, afrFull:12.8, dens:745, R:287.05, rouge:6250};
+
+/* ───────── Stockage ───────── */
+const KEY="clioK4J.v1";
+function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.facteur)return s}catch(e){}
+  return{facteur:1,litresCalc:0,km:0,pleins:[],trajets:[]}}
+let S=load();
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){msg("Impossible d'enregistrer dans ce navigateur (stockage plein ou bloqué).",true)}}
+
+/* ───────── UI helpers ───────── */
+const $=id=>document.getElementById(id);
+function msg(t,bad){$("msg").textContent=t;$("msg").className="msg"+(bad?" bad":"")}
+function pill(state,t){$("pill").className="pill "+state;$("pillTxt").textContent=t}
+const fx=(v,d=0)=>v==null||isNaN(v)?"--":v.toFixed(d);
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===b));
+  ["route","diag","plein","trajets"].forEach(v=>$("v-"+v).hidden=v!==b.dataset.v);
+  if(b.dataset.v==="plein")renderPleins(); if(b.dataset.v==="trajets")renderTrajets();
+});
+
+/* ───────── Transport Bluetooth LE ───────── */
+const SERVICES=[0xFFE0,0xFFF0,0x18F0,0xFFE5,"e7810a71-73ae-499d-8c15-faa9aef0c3f2"];
+const enc=new TextEncoder(),dec=new TextDecoder();
+class BleTransport{
+  async open(onText){
+    if(!navigator.bluetooth) throw new Error("NOBT");
+    this.dev=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:SERVICES});
+    this.dev.addEventListener("gattserverdisconnected",()=>onDisconnect());
+    const srv=await this.dev.gatt.connect();
+    let notif=null,wr=null;
+    for(const u of SERVICES){
+      let s;try{s=await srv.getPrimaryService(u)}catch(e){continue}
+      const chars=await s.getCharacteristics();
+      for(const c of chars){
+        if(!notif&&(c.properties.notify||c.properties.indicate))notif=c;
+        if(!wr&&(c.properties.write||c.properties.writeWithoutResponse))wr=c;
+      }
+      if(notif&&wr)break;
+    }
+    if(!notif||!wr) throw new Error("NOCHAR");
+    this.wr=wr;
+    notif.addEventListener("characteristicvaluechanged",e=>onText(dec.decode(e.target.value)));
+    await notif.startNotifications();
+    return this.dev.name||"OBDBLE";
+  }
+  async write(t){
+    const b=enc.encode(t);
+    for(let i=0;i<b.length;i+=20){
+      const chunk=b.slice(i,i+20);
+      if(this.wr.properties.writeWithoutResponse&&this.wr.writeValueWithoutResponse)await this.wr.writeValueWithoutResponse(chunk);
+      else await this.wr.writeValue(chunk);
+    }
+  }
+  close(){try{this.dev&&this.dev.gatt.connected&&this.dev.gatt.disconnect()}catch(e){}}
+}
+
+/* ───────── Simulateur (bouton « Essayer sans voiture ») ───────── */
+class DemoTransport{
+  async open(onText){this.on=onText;this.t0=performance.now();this.codes=["0301","0134"];return"Démo"}
+  sim(){const t=(performance.now()-this.t0)/1000;
+    const v=Math.max(0,55+45*Math.sin(t/25)+8*Math.sin(t/4));
+    const g=v<18?1:v<35?2:v<55?3:v<80?4:5, ratio=[0,120,70,48,37,30][g];
+    const rpm=Math.max(820,v*ratio+(Math.sin(t*3)*40));
+    const acc=Math.cos(t/25)*45/25+Math.cos(t/4)*8/4;
+    const pap=acc<-0.3?0:Math.min(60,8+acc*20+v/8);
+    const map=pap===0&&rpm>1300?22:Math.min(98,30+pap*1.1);
+    return{v,rpm,pap:pap+11.8,map,eau:Math.min(89,25+t/3),air:24,load:map*0.9,av:18+Math.sin(t),o2:0.45+0.4*Math.sin(t*5),st:3*Math.sin(t*2),lt:2.3}}
+  respond(c){
+    const h=n=>Math.max(0,Math.min(255,Math.round(n))).toString(16).padStart(2,"0").toUpperCase();
+    if(c==="ATZ")return"\r\rELM327 v1.5";
+    if(c==="ATRV")return(13.7+Math.random()*.3).toFixed(1)+"V";
+    if(c.startsWith("AT"))return"OK";
+    if(c==="0100")return"41009E3E9000";
+    if(c==="0101")return"4101"+h((this.codes.length?0x80:0)+this.codes.length)+"076500";
+    if(c==="03")return this.codes.length?"43"+(this.codes.join("")+"00000000").slice(0,12):"43000000000000";
+    if(c==="07")return"47000000000000";
+    if(c==="04"){this.codes=[];return"44"}
+    const s=this.sim(),p=c.slice(2);
+    const map={"0C":h(s.rpm*4/256)+h((s.rpm*4)%256),"0D":h(s.v),"0B":h(s.map),"11":h(s.pap*255/100),"06":h(s.st*128/100+128),
+      "07":h(s.lt*128/100+128),"05":h(s.eau+40),"0F":h(s.air+40),"04":h(s.load*255/100),"0E":h((s.av+64)*2),"14":h(s.o2*200)+"FF"};
+    return map[p]?"41"+p+map[p]:"NO DATA";
+  }
+  async write(t){const c=t.trim().replace(/\s/g,"").toUpperCase();
+    setTimeout(()=>this.on(this.respond(c)+"\r\r>"),c==="0100"?600:45)}
+  close(){}
+}
+
+/* ───────── Couche ELM327 ───────── */
+let T=null,rx="",waiter=null,chain=Promise.resolve(),demo=false;
+function onText(t){rx+=t;if(rx.includes(">")&&waiter){const r=rx;rx="";const w=waiter;waiter=null;w(r)}}
+function raw(c,ms){return new Promise((res,rej)=>{
+  rx="";const timer=setTimeout(()=>{waiter=null;res("TIMEOUT")},ms);
+  waiter=r=>{clearTimeout(timer);res(r)};
+  T.write(c+"\r").catch(e=>{clearTimeout(timer);waiter=null;rej(e)});
+})}
+function cmd(c,ms=2500){const p=chain.then(()=>raw(c,ms));chain=p.catch(()=>{});return p}
+function lines(r,c){return r.replace(/>/g,"").split(/[\r\n]+/).map(s=>s.replace(/\s/g,"").toUpperCase())
+  .filter(s=>s&&s!==c&&!s.startsWith("SEARCHING")&&!s.startsWith("BUSINIT")&&s!=="OK")}
+function bytes(hex){const b=[];for(let i=0;i+1<hex.length;i+=2){const n=parseInt(hex.substr(i,2),16);if(isNaN(n))return null;b.push(n)}return b}
+async function pid(p,ms){const r=await cmd("01"+p,ms);
+  for(const l of lines(r,"01"+p)){const i=l.indexOf("41"+p);if(i>=0){const b=bytes(l.slice(i+4));if(b&&b.length)return b}}return null}
+
+const PIDS={
+  rpm:["0C",b=>(b[0]*256+b[1])/4], vit:["0D",b=>b[0]], map:["0B",b=>b[0]], pap:["11",b=>b[0]*100/255],
+  stft:["06",b=>(b[0]-128)*100/128], ltft:["07",b=>(b[0]-128)*100/128], eau:["05",b=>b[0]-40],
+  air:["0F",b=>b[0]-40], charge:["04",b=>b[0]*100/255], av:["0E",b=>b[0]/2-64], o2:["14",b=>b[0]/200]
+};
+const FAST=["rpm","vit","map","pap","stft"], SLOW=["eau","air","ltft","charge","av","o2"];
+let supported=null;
+
+async function initElm(){
+  pill("busy","Boîtier…");
+  await cmd("ATZ",4000);
+  for(const c of["ATE0","ATL0","ATS0","ATH0","ATAT1"])await cmd(c);
+  // Clio 2 phase 2 : ligne K. On laisse le boîtier chercher, puis on force KWP2000 et ISO 9141.
+  for(const sp of["ATSP0","ATSP5","ATSP4","ATSP3"]){
+    pill("busy","Calculateur…");
+    await cmd(sp);
+    const r=await cmd("0100",20000);
+    const l=lines(r,"0100").find(x=>x.includes("4100"));
+    if(l){const b=bytes(l.slice(l.indexOf("4100")+4));
+      supported=b&&b.length>=4?b:null;return true}
+  }
+  return false;
+}
+function isSup(p){if(!supported)return true;const n=parseInt(p,16)-1;if(n>31)return true;return(supported[n>>3]>>(7-(n&7)))&1}
+
+/* ───────── Conso ───────── */
+let papMin=100;
+function debitLh(d){
+  if(d.rpm==null||d.map==null||d.rpm<300)return 0;
+  if(d.pap!=null)papMin=Math.min(papMin,d.pap);
+  const papRel=d.pap==null?null:d.pap-papMin;          // papillon relatif : 0 = pied levé
+  if(papRel!=null&&papRel<1.5&&d.rpm>1300&&(d.vit||0)>15&&d.map<35)return 0; // coupure d'injection
+  const tk=(d.air??20)+273.15;
+  const airGs=d.map*1000*(K4J.cyl/1000)*(d.rpm/120)*K4J.ve/(K4J.R*tk)*1000;
+  const full=papRel!=null&&papRel>=70;
+  let ess=airGs/(full?K4J.afrFull:K4J.afr);
+  if(!full)ess*=1+((d.stft||0)+(d.ltft||0))/100;
+  return ess*3600/K4J.dens*S.facteur;
+}
+
+/* ───────── Boucle de lecture ───────── */
+let running=false,D={},trip=null,wake=null;
+async function startWake(){try{wake=await navigator.wakeLock?.request("screen")}catch(e){}}
+document.addEventListener("visibilitychange",()=>{if(running&&document.visibilityState==="visible")startWake()});
+
+async function connect(useDemo){
+  demo=useDemo;
+  $("bConnect").disabled=$("bDemo").disabled=true;
+  try{
+    T=useDemo?new DemoTransport():new BleTransport();
+    pill("busy","Recherche…");msg(useDemo?"Mode démo : données simulées.":"Choisis ton boîtier (souvent « OBDBLE ») dans la liste.");
+    const name=await T.open(onText);
+    const ok=await initElm();
+    if(!ok){pill("err","Pas de calculateur");msg("Le boîtier répond mais pas la voiture. Mets le contact (ou démarre), attends 5 s et réessaie.",true);T.close();reset();return}
+    pill("on",useDemo?"Démo":"Connecté");
+    msg(useDemo?"Mode démo : rien de tout ça ne vient de ta voiture.":`Connecté à ${name}. Le trajet s'enregistre. Pose le téléphone, bonne route.`);
+    $("connRow").hidden=true;$("bStop").disabled=false;
+    startTrip();startWake();loop();
+  }catch(e){
+    const n=e&&e.message;
+    if(n==="NOBT")msg("Ce navigateur ne gère pas le Bluetooth. Ouvre cette page dans l'app Bluefy.",true);
+    else if(e&&e.name==="NotFoundError")msg("Aucun boîtier choisi. Réessaie et sélectionne « OBDBLE ».",true);
+    else if(n==="NOCHAR")msg("Boîtier trouvé, mais son type de Bluetooth n'est pas reconnu. Envoie-moi son nom exact.",true);
+    else msg("Connexion impossible : "+(n||e)+". Ferme Car Scanner et réessaie.",true);
+    pill("err","Erreur");reset();
+  }
+}
+function reset(){$("bConnect").disabled=$("bDemo").disabled=false;$("connRow").hidden=false;$("bStop").disabled=true}
+function onDisconnect(){if(running){running=false;endTrip();pill("err","Coupé");msg("Liaison perdue. Le trajet a été enregistré jusque-là.",true);reset()}}
+
+async function loop(){
+  running=true;let n=0,prev=performance.now(),bat=null;
+  const fast=FAST.filter(k=>isSup(PIDS[k][0])),slow=SLOW.filter(k=>isSup(PIDS[k][0]));
+  while(running){
+    try{
+      for(const k of fast){const b=await pid(PIDS[k][0]);D[k]=b?PIDS[k][1](b):null}
+      if(n%5===0){for(const k of slow){const b=await pid(PIDS[k][0]);D[k]=b?PIDS[k][1](b):null}
+        const r=await cmd("ATRV");const m=r.match(/(\d+\.\d)\s*V/i);bat=m?+m[1]:null}
+    }catch(e){onDisconnect();return}
+    if(!running)break;
+    n++;
+    const now=performance.now(),dt=(now-prev)/1000;prev=now;
+    D.bat=bat;D.lh=debitLh(D);
+    tick(dt);render();
+  }
+}
+
+/* ───────── Trajet ───────── */
+function startTrip(){trip={debut:Date.now(),km:0,litres:0,maxRpm:0,maxEau:0,demo,pts:[],lastPt:0};papMin=100}
+function tick(dt){
+  if(!trip||dt>5)return;
+  const v=D.vit||0;trip.km+=v*dt/3600;trip.litres+=D.lh*dt/3600;
+  trip.maxRpm=Math.max(trip.maxRpm,D.rpm||0);trip.maxEau=Math.max(trip.maxEau,D.eau||0);
+  const t=Date.now();
+  if(t-trip.lastPt>=1000){trip.lastPt=t;
+    trip.pts.push([Math.round((t-trip.debut)/1000),r1(D.rpm),r1(v),r1(D.map),r1(D.pap),r1(D.eau),r1(D.stft),r1(D.ltft),r1(D.bat),+D.lh.toFixed(2)]);
+    if(trip.pts.length>14400)trip.pts.shift()}
+}
+const r1=v=>v==null?null:Math.round(v*10)/10;
+function endTrip(){
+  if(!trip)return;const t=trip;trip=null;
+  if(t.km<0.05&&t.pts.length<10)return;
+  const rec={debut:t.debut,fin:Date.now(),km:+t.km.toFixed(2),litres:+t.litres.toFixed(3),maxRpm:Math.round(t.maxRpm),maxEau:Math.round(t.maxEau),demo:t.demo,pts:t.pts};
+  S.trajets.unshift(rec);
+  while(S.trajets.length>15)S.trajets.pop();
+  if(!t.demo){S.km+=t.km;S.litresCalc+=t.litres}
+  save();
+}
+$("bStop").onclick=()=>{running=false;endTrip();T&&T.close();pill("","Déconnecté");msg("Trajet enregistré. Il est dans l'onglet Trajets.");reset()};
+$("bConnect").onclick=()=>connect(false);
+$("bDemo").onclick=()=>connect(true);
+
+function render(){
+  const v=D.vit||0,l100=v>5?D.lh/v*100:null;
+  $("lInst").textContent=l100!=null?Math.min(l100,99.9).toFixed(1):D.lh.toFixed(2);
+  $("lInstU").textContent=l100!=null?"L/100 km instantané":"L/h à l'arrêt";
+  $("lMoy").textContent=trip&&trip.km>0.3?(trip.litres/trip.km*100).toFixed(1):"--.-";
+  $("lVit").textContent=fx(v);
+  const pr=Math.min(1,(D.rpm||0)/6500);$("rpmBar").firstElementChild.style.width=pr*100+"%";
+  $("rpmBar").classList.toggle("red",(D.rpm||0)>K4J.rouge);
+  $("tRpm").textContent=fx(D.rpm);$("tEau").textContent=fx(D.eau);$("tBat").textContent=fx(D.bat,1);
+  $("tMap").textContent=fx(D.map);$("tPap").textContent=fx(D.pap);$("tCharge").textContent=fx(D.charge);
+  $("tAir").textContent=fx(D.air);$("tAv").textContent=fx(D.av,1);$("tO2").textContent=fx(D.o2,2);
+  $("tStft").textContent=fx(D.stft,1);$("tLtft").textContent=fx(D.ltft,1);$("tLh").textContent=fx(D.lh,2);
+  $("tileEau").className="tile"+(D.eau>105?" bad":D.eau>98?" warn":"");
+  $("tileBat").className="tile"+(D.bat!=null&&(D.bat<12.2||D.bat>14.8)?" warn":"");
+  if(trip){$("sKm").textContent=trip.km.toFixed(1);$("sL").textContent=trip.litres.toFixed(2);
+    const s=Math.round((Date.now()-trip.debut)/1000);$("sT").textContent=Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
+    $("sMax").textContent=Math.round(trip.maxRpm)}
+}
+
+/* ───────── Diagnostic ───────── */
+const DTC_FR=[[100,104,"Débitmètre d'air"],[105,109,"Capteur de pression d'admission"],[110,114,"Sonde de température d'air"],
+  [115,119,"Sonde de température d'eau"],[120,124,"Potentiomètre de papillon"],[125,125,"Moteur trop lent à chauffer (thermostat ?)"],
+  [130,135,"Sonde lambda amont"],[136,141,"Sonde lambda aval"],[170,172,"Richesse mal régulée (prise d'air, injecteur, pression d'essence)"],
+  [201,204,"Injecteur"],[230,230,"Relais de pompe à essence"],[300,300,"Ratés d'allumage sur plusieurs cylindres (bougies, bobine)"],
+  [301,304,"Ratés d'allumage sur un cylindre (bougie, bobine, injecteur)"],[325,334,"Capteur de cliquetis"],
+  [335,339,"Capteur de régime / PMH (volant moteur)"],[340,344,"Capteur d'arbre à cames"],[351,354,"Bobine d'allumage"],
+  [420,420,"Catalyseur peu efficace"],[440,446,"Circuit canister (vapeurs d'essence)"],[500,503,"Capteur de vitesse"],
+  [505,509,"Régulation de ralenti (moteur pas à pas)"],[560,563,"Tension batterie / charge"],[600,606,"Calculateur moteur"]];
+function dtcFr(code){if(code[0]!=="P"||code[1]!=="0")return"Code constructeur Renault (consulte DDT4all)";
+  const n=parseInt(code.slice(2),16)>0x999?-1:parseInt(code.slice(2),10);
+  if(code[2]==="3"&&/^30[1-4]$/.test(code.slice(2)))return`Ratés d'allumage cylindre ${code[4]} (bougie, bobine, injecteur)`;
+  const f=DTC_FR.find(([a,b])=>n>=a&&n<=b);return f?f[2]:"Voir la description du code en ligne"}
+function decodeDtc(h){const a=parseInt(h.slice(0,2),16);return"PCBU"[a>>6]+((a>>4)&3)+(a&15).toString(16).toUpperCase()+h.slice(2)}
+function parseDtc(r,mode){const out=[];
+  for(const l of lines(r,mode)){const i=l.indexOf(String(40+ +mode));if(i<0)continue;
+    const d=l.slice(i+2);for(let k=0;k+3<d.length;k+=4){const c=d.substr(k,4);if(c!=="0000")out.push(decodeDtc(c))}}
+  return[...new Set(out)]}
+const milSvg=on=>`<svg width="34" height="24" viewBox="0 0 34 24" aria-hidden="true"><path d="M6 6h4V3h10v3h4l3 4h4v8h-4l-3 3H9l-3-4H3V9h3z" fill="${on?"var(--warn)":"var(--line)"}"/></svg>`;
+async function readDtc(){
+  if(!running||!T){$("diagOut").innerHTML='<div class="msg bad">Connecte d\'abord le boîtier depuis l\'onglet Route.</div>';return}
+  $("diagOut").innerHTML='<div class="msg">Lecture…</div>';
+  const st=await pid("01",4000);const mil=st?!!(st[0]&0x80):null,cnt=st?st[0]&0x7f:null;
+  const conf=parseDtc(await cmd("03",6000),"03"),pend=parseDtc(await cmd("07",6000),"07").filter(c=>!conf.includes(c));
+  let h=`<div class="mil">${milSvg(mil)}<span>Voyant moteur ${mil==null?"inconnu":mil?"allumé":"éteint"}${cnt!=null?` · ${cnt} code(s) mémorisé(s)`:""}</span></div>`;
+  if(!conf.length&&!pend.length)h+='<div>Aucun code défaut moteur.</div>';
+  if(conf.length)h+='<div class="dtc">'+conf.map(c=>`<b>${c}</b><span>${dtcFr(c)}</span>`).join("")+"</div>";
+  if(pend.length)h+='<div class="msg">En attente (pas encore confirmés) :</div><div class="dtc">'+pend.map(c=>`<b>${c}</b><span>${dtcFr(c)}</span>`).join("")+"</div>";
+  if(demo)h+='<div class="demo">Codes simulés (mode démo)</div>';
+  h+='<div class="msg">Ce boîtier lit le calculateur moteur. Airbag, ABS et clim demandent DDT4all.</div>';
+  $("diagOut").innerHTML=h;
+}
+$("bRead").onclick=readDtc;
+let armTimer=null;
+$("bClear").onclick=async()=>{
+  const b=$("bClear");
+  if(!running||!T){$("diagMsg").textContent="Connecte d'abord le boîtier.";return}
+  if(!b.classList.contains("armed")){b.classList.add("armed");b.textContent="Appuie encore pour confirmer";
+    armTimer=setTimeout(()=>{b.classList.remove("armed");b.textContent="Effacer les codes"},4000);return}
+  clearTimeout(armTimer);b.classList.remove("armed");b.textContent="Effacer les codes";
+  const r=await cmd("04",6000);
+  $("diagMsg").textContent=lines(r,"04").some(l=>l.includes("44"))?"Codes effacés. Le calculateur réapprend ses corrections sur les prochains km.":"La voiture a refusé. Coupe le moteur, laisse le contact et réessaie.";
+  readDtc();
+};
+
+/* ───────── Pleins ───────── */
+$("bPlein").onclick=()=>{
+  const L=parseFloat(String($("iLitres").value).replace(",","."));const out=$("pleinMsg");
+  if(!(L>0&&L<60)){out.textContent="Entre les litres affichés sur la pompe (entre 1 et 60).";return}
+  const date=new Date().toISOString();
+  if(S.km<1){S.pleins.unshift({date,litres:L,depart:true});save();$("iLitres").value="";
+    out.textContent="Point de départ enregistré. Enregistre tous tes trajets jusqu'au prochain plein à ras.";renderPleins();return}
+  const reel=L/S.km*100,calc=S.litresCalc/S.km*100,ratio=S.litresCalc>0?L/S.litresCalc:1;
+  let note;const calibre=S.km>=80&&ratio>0.6&&ratio<1.6;
+  if(S.km<80)note="Moins de 80 km : trop court pour calibrer, conso notée.";
+  else if(!calibre)note=`Écart trop grand (×${ratio.toFixed(2)}) : un trajet n'a sûrement pas été enregistré. Calibration ignorée.`;
+  else{const n=S.pleins.filter(p=>p.calibre).length,w=n===0?1:.5,old=S.facteur;S.facteur=+(old*(1-w+w*ratio)).toFixed(4);
+    note=`Calibration ajustée : ${old.toFixed(3)} → ${S.facteur.toFixed(3)}.`}
+  S.pleins.unshift({date,litres:L,km:+S.km.toFixed(1),reel:+reel.toFixed(2),calc:+calc.toFixed(2),calibre});
+  S.km=0;S.litresCalc=0;save();$("iLitres").value="";
+  out.textContent=`${reel.toFixed(1)} L/100 réels sur ce plein (calculé : ${calc.toFixed(1)}). ${note}`;renderPleins();
+};
+function renderPleins(){
+  const vrais=S.pleins.filter(p=>p.reel);
+  const moy=vrais.length?vrais.reduce((a,p)=>a+p.litres,0)/vrais.reduce((a,p)=>a+p.km,0)*100:null;
+  $("calib").innerHTML=`<span>Conso moyenne réelle</span><b>${moy?moy.toFixed(1)+" L/100":"après 2 pleins"}</b>
+    <span>Depuis le dernier plein</span><b>${S.km.toFixed(0)} km · ${S.litresCalc.toFixed(1)} L</b>
+    <span>Facteur de calibration</span><b>${S.facteur.toFixed(3)}</b>`;
+  $("pleinList").innerHTML=S.pleins.slice(0,10).map(p=>`<div class="it"><span>${new Date(p.date).toLocaleDateString("fr-FR")} · ${p.litres.toFixed(2)} L</span>
+    <b>${p.reel?p.reel.toFixed(1):"départ"}</b><small>${p.reel?`${p.km.toFixed(0)} km · calculé ${p.calc.toFixed(1)}${p.calibre?"":" · non calibré"}`:"premier plein"}</small><small>${p.reel?"L/100":""}</small></div>`).join("");
+}
+
+/* ───────── Trajets ───────── */
+function renderTrajets(){
+  $("tripList").innerHTML=S.trajets.length?S.trajets.map((t,i)=>{const d=new Date(t.debut),min=Math.round((t.fin-t.debut)/60000);
+    return`<button class="it" data-i="${i}"><span>${d.toLocaleDateString("fr-FR")} ${d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})} · ${min} min${t.demo?" · démo":""}</span>
+    <b>${t.km>0.3?(t.litres/t.km*100).toFixed(1):"--"}</b><small>${t.km.toFixed(1)} km · ${t.litres.toFixed(2)} L · ${t.maxRpm} tr/min max</small><small>L/100</small></button>`}).join("")
+    :'<div class="msg">Aucun trajet pour l\'instant. Connecte le boîtier et roule, ou essaie le mode démo.</div>';
+  document.querySelectorAll("#tripList .it").forEach(b=>b.onclick=()=>showTrip(+b.dataset.i));
+}
+function showTrip(i){
+  const t=S.trajets[i],box=$("tripDetail");box.hidden=false;
+  box.innerHTML=`<div class="row" style="align-items:center"><h2 style="flex:1">${new Date(t.debut).toLocaleString("fr-FR",{dateStyle:"short",timeStyle:"short"})}</h2></div>
+    <canvas id="cv" width="800" height="560" aria-label="Courbes du trajet"></canvas>
+    <div class="row"><button class="btn" id="bCsv">Exporter en CSV</button><button class="btn" id="bClose">Fermer</button></div>`;
+  draw($("cv"),t.pts);
+  $("bClose").onclick=()=>{box.hidden=true};
+  $("bCsv").onclick=()=>{
+    const head="secondes;regime;vitesse;admission_kPa;papillon;eau;corr_courte;corr_longue;batterie;conso_L_h\n";
+    const csv=head+t.pts.map(p=>p.map(v=>v==null?"":String(v).replace(".",",")).join(";")).join("\n");
+    shareFile(csv,`trajet_${new Date(t.debut).toISOString().slice(0,16).replace(/[:T]/g,"-")}.csv`,"text/csv",$("backupMsg"));
+  };
+  box.scrollIntoView({behavior:"smooth"});
+}
+function draw(cv,pts){
+  const c=cv.getContext("2d"),W=cv.width,H=cv.height,css=getComputedStyle(document.documentElement);
+  const col={fg:css.getPropertyValue("--muted"),line:css.getPropertyValue("--line"),lcd:css.getPropertyValue("--lcd"),ok:css.getPropertyValue("--ok"),warn:css.getPropertyValue("--warn")};
+  c.fillStyle=css.getPropertyValue("--bg");c.fillRect(0,0,W,H);
+  if(pts.length<2){c.fillStyle=col.fg;c.font="24px sans-serif";c.fillText("Trajet trop court",20,40);return}
+  const series=[["Vitesse km/h",2,col.ok,0,null],["Régime tr/min",1,col.warn,0,null],["Conso L/100",9,col.lcd,0,30]];
+  const tMax=pts[pts.length-1][0]||1,ph=H/3;
+  series.forEach(([lab,idx,color,mn,mxFix],s)=>{
+    const vals=pts.map(p=>idx===9?(p[2]>5?p[9]/p[2]*100:null):p[idx]);
+    const mx=mxFix||Math.max(1,...vals.filter(v=>v!=null))*1.1,y0=s*ph+ph-14,y1=s*ph+28;
+    c.strokeStyle=col.line;c.lineWidth=1;c.beginPath();c.moveTo(50,y0);c.lineTo(W-10,y0);c.moveTo(50,y1);c.lineTo(W-10,y1);c.stroke();
+    c.fillStyle=col.fg;c.font="20px sans-serif";c.fillText(lab,50,s*ph+20);c.textAlign="right";c.fillText(Math.round(mx),46,y1+6);c.fillText("0",46,y0+6);c.textAlign="left";
+    c.strokeStyle=color;c.lineWidth=2.5;c.beginPath();let on=false;
+    pts.forEach((p,k)=>{const v=vals[k];if(v==null){on=false;return}
+      const x=50+(p[0]/tMax)*(W-60),y=y0-(Math.min(v,mx)-mn)/(mx-mn)*(y0-y1);on?c.lineTo(x,y):c.moveTo(x,y);on=true});
+    c.stroke();
+  });
+}
+async function shareFile(text,name,type,out){
+  try{const f=new File([text],name,{type});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return}}catch(e){if(e.name==="AbortError")return}
+  try{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();a.remove();
+    out.textContent="Fichier « "+name+" » téléchargé.";}
+  catch(e){try{await navigator.clipboard.writeText(text);out.textContent="Copié dans le presse-papiers."}catch(_){out.textContent="Export impossible dans ce navigateur."}}
+}
+$("bBackup").onclick=()=>shareFile(JSON.stringify(S),"clio-k4j-sauvegarde.json","application/json",$("backupMsg"));
+$("bRestore").onclick=()=>$("fRestore").click();
+$("fRestore").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.facteur||!Array.isArray(d.pleins))throw 0;S=d;save();renderTrajets();$("backupMsg").textContent="Sauvegarde importée."}
+    catch(_){$("backupMsg").textContent="Ce fichier n'est pas une sauvegarde de cette app."}};r.readAsText(f)};
+</script>
+</body>
+</html>
