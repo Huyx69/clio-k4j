@@ -84,6 +84,9 @@ label{font-size:13px;color:var(--muted)}
 #iLitres{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;font:600 26px var(--f-num)}
 .kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-variant-numeric:tabular-nums}
 .kv span{color:var(--muted)}
+details{font-size:13px;color:var(--muted)}
+summary{cursor:pointer;padding:4px 0}
+#log{margin:6px 0 0;padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;max-height:240px;overflow:auto;font:12px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-all;color:var(--fg)}
 canvas{width:100%;height:auto;display:block;background:var(--bg);border-radius:8px}
 .demo{font-size:11px;color:var(--warn);letter-spacing:.06em;text-transform:uppercase}
 
@@ -107,6 +110,7 @@ nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:re
       <button class="btn main" id="bConnect">Connecter le boîtier</button>
       <button class="btn" id="bDemo">Essayer sans voiture</button>
     </div>
+    <details id="logBox"><summary>Journal de connexion</summary><pre id="log">Rien pour l'instant.</pre></details>
     <div class="msg" id="msg">Contact mis, boîtier branché, puis « Connecter ». Ferme Car Scanner avant : le boîtier n'accepte qu'une app à la fois.</div>
 
     <div class="lcd">
@@ -216,36 +220,60 @@ document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
 });
 
 /* ───────── Transport Bluetooth LE ───────── */
-const SERVICES=[0xFFE0,0xFFF0,0x18F0,0xFFE5,"e7810a71-73ae-499d-8c15-faa9aef0c3f2"];
+// UUID complets en minuscules : certains navigateurs iOS refusent les formes courtes.
+const U=s=>`0000${s}-0000-1000-8000-00805f9b34fb`;
+const SERVICES=[U("fff0"),U("ffe0"),U("18f0"),U("ffe5"),U("ae30"),U("fee7"),"e7810a71-73ae-499d-8c15-faa9aef0c3f2"];
 const enc=new TextEncoder(),dec=new TextDecoder();
+let step="";
+const LOG=[];
+function log(s){LOG.push(new Date().toLocaleTimeString("fr-FR")+"  "+s);if(LOG.length>80)LOG.shift();const el=$("log");if(el)el.textContent=LOG.join("\n")}
+const errTxt=e=>e==null?"?":typeof e==="object"?((e.name?e.name+": ":"")+(e.message||JSON.stringify(e))):String(e);
 class BleTransport{
   async open(onText){
     if(!navigator.bluetooth) throw new Error("NOBT");
+    step="choix du boîtier";log("Bluetooth dispo, ouverture de la liste…");
     this.dev=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:SERVICES});
-    this.dev.addEventListener("gattserverdisconnected",()=>onDisconnect());
-    const srv=await this.dev.gatt.connect();
+    log("Choisi : "+(this.dev.name||"(sans nom)"));
+    try{this.dev.addEventListener("gattserverdisconnected",()=>onDisconnect())}catch(e){}
+    step="connexion Bluetooth";
+    let srv=null;
+    for(let i=1;i<=3&&!srv;i++){
+      try{srv=await this.dev.gatt.connect();log("GATT connecté (essai "+i+")")}
+      catch(e){log("GATT essai "+i+" : "+errTxt(e));if(i===3)throw e;await new Promise(r=>setTimeout(r,800))}
+    }
+    step="lecture des services";
+    let list=[];
+    try{list=await srv.getPrimaryServices();log("Services : "+list.map(s=>s.uuid.slice(4,8)).join(", "))}
+    catch(e){log("Liste services : "+errTxt(e))}
+    if(!list.length){for(const u of SERVICES){try{list.push(await srv.getPrimaryService(u));log("Service trouvé "+u.slice(4,8))}catch(e){}}}
     let notif=null,wr=null;
-    for(const u of SERVICES){
-      let s;try{s=await srv.getPrimaryService(u)}catch(e){continue}
-      const chars=await s.getCharacteristics();
+    for(const s of list){
+      let chars=[];
+      try{chars=await s.getCharacteristics()}catch(e){log("Caract. "+s.uuid.slice(4,8)+" : "+errTxt(e));continue}
       for(const c of chars){
-        if(!notif&&(c.properties.notify||c.properties.indicate))notif=c;
-        if(!wr&&(c.properties.write||c.properties.writeWithoutResponse))wr=c;
+        const p=c.properties||{};
+        log(` ${s.uuid.slice(4,8)}/${c.uuid.slice(4,8)} ${p.notify?"N":""}${p.indicate?"I":""}${p.write?"W":""}${p.writeWithoutResponse?"w":""}`);
+        if(!notif&&(p.notify||p.indicate))notif=c;
+        if(!wr&&(p.write||p.writeWithoutResponse))wr=c;
       }
       if(notif&&wr)break;
     }
     if(!notif||!wr) throw new Error("NOCHAR");
     this.wr=wr;
-    notif.addEventListener("characteristicvaluechanged",e=>onText(dec.decode(e.target.value)));
+    step="abonnement aux réponses";
+    notif.addEventListener("characteristicvaluechanged",e=>{const t=dec.decode(e.target.value);log("← "+t.replace(/\r/g,"⏎"));onText(t)});
     await notif.startNotifications();
+    log("Prêt.");
     return this.dev.name||"OBDBLE";
   }
   async write(t){
     const b=enc.encode(t);
     for(let i=0;i<b.length;i+=20){
       const chunk=b.slice(i,i+20);
-      if(this.wr.properties.writeWithoutResponse&&this.wr.writeValueWithoutResponse)await this.wr.writeValueWithoutResponse(chunk);
-      else await this.wr.writeValue(chunk);
+      try{
+        if(this.wr.properties.writeWithoutResponse&&this.wr.writeValueWithoutResponse)await this.wr.writeValueWithoutResponse(chunk);
+        else await this.wr.writeValue(chunk);
+      }catch(e){await this.wr.writeValue(chunk)}
     }
   }
   close(){try{this.dev&&this.dev.gatt.connected&&this.dev.gatt.disconnect()}catch(e){}}
@@ -286,7 +314,7 @@ class DemoTransport{
 let T=null,rx="",waiter=null,chain=Promise.resolve(),demo=false;
 function onText(t){rx+=t;if(rx.includes(">")&&waiter){const r=rx;rx="";const w=waiter;waiter=null;w(r)}}
 function raw(c,ms){return new Promise((res,rej)=>{
-  rx="";const timer=setTimeout(()=>{waiter=null;res("TIMEOUT")},ms);
+  rx="";if(!demo)log("→ "+c);const timer=setTimeout(()=>{waiter=null;res("TIMEOUT")},ms);
   waiter=r=>{clearTimeout(timer);res(r)};
   T.write(c+"\r").catch(e=>{clearTimeout(timer);waiter=null;rej(e)});
 })}
@@ -349,6 +377,7 @@ async function connect(useDemo){
     T=useDemo?new DemoTransport():new BleTransport();
     pill("busy","Recherche…");msg(useDemo?"Mode démo : données simulées.":"Choisis ton boîtier (souvent « OBDBLE ») dans la liste.");
     const name=await T.open(onText);
+    step="dialogue avec la voiture";
     const ok=await initElm();
     if(!ok){pill("err","Pas de calculateur");msg("Le boîtier répond mais pas la voiture. Mets le contact (ou démarre), attends 5 s et réessaie.",true);T.close();reset();return}
     pill("on",useDemo?"Démo":"Connecté");
@@ -356,11 +385,11 @@ async function connect(useDemo){
     $("connRow").hidden=true;$("bStop").disabled=false;
     startTrip();startWake();loop();
   }catch(e){
-    const n=e&&e.message;
+    const n=e&&e.message;log("ERREUR à l'étape « "+step+" » : "+errTxt(e));$("logBox").open=true;
     if(n==="NOBT")msg("Ce navigateur ne gère pas le Bluetooth. Ouvre cette page dans l'app Bluefy.",true);
     else if(e&&e.name==="NotFoundError")msg("Aucun boîtier choisi. Réessaie et sélectionne « OBDBLE ».",true);
     else if(n==="NOCHAR")msg("Boîtier trouvé, mais son type de Bluetooth n'est pas reconnu. Envoie-moi son nom exact.",true);
-    else msg("Connexion impossible : "+(n||e)+". Ferme Car Scanner et réessaie.",true);
+    else msg(`Bloqué à l'étape « ${step} » (${errTxt(e)}). Ouvre le journal ci-dessous et envoie-moi une capture.`,true);
     pill("err","Erreur");reset();
   }
 }
