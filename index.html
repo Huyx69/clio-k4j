@@ -81,7 +81,10 @@ h2{font:700 22px/1.1 var(--f-num);text-transform:uppercase;letter-spacing:.04em;
 .list .it small{color:var(--muted)}
 .list .it b{font:600 20px var(--f-num);font-variant-numeric:tabular-nums;text-align:right}
 label{font-size:13px;color:var(--muted)}
-#iLitres{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;font:600 26px var(--f-num)}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.seg .btn{padding:10px 8px;font-size:14px}
+.seg .btn.on{border-color:var(--lcd);color:var(--lcd);background:#24140b}
+#iLitres,#iPrix{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;font:600 26px var(--f-num)}
 .kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-variant-numeric:tabular-nums}
 .kv span{color:var(--muted)}
 details{font-size:13px;color:var(--muted)}
@@ -100,7 +103,7 @@ nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:re
 <body>
 <div class="app">
   <header class="wrap">
-    <div class="brand">Clio 2 · K4J<small>1.4 16V · 2001-2003</small></div>
+    <div class="brand">Clio 2 · K4J<small id="fuelTag">1.4 16V · E85</small></div>
     <div class="pill" id="pill"><i></i><span id="pillTxt">Déconnecté</span></div>
   </header>
 
@@ -133,10 +136,11 @@ nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:re
       <div class="tile"><span>Avance</span><b id="tAv">--</b><small>°</small></div>
       <div class="tile"><span>Sonde O2</span><b id="tO2">--</b><small>V</small></div>
       <div class="tile"><span>Corr. courte</span><b id="tStft">--</b><small>%</small></div>
-      <div class="tile"><span>Corr. longue</span><b id="tLtft">--</b><small>%</small></div>
+      <div class="tile" id="tileLtft"><span>Corr. longue</span><b id="tLtft">--</b><small>%</small></div>
       <div class="tile"><span>Débit</span><b id="tLh">--</b><small>L/h</small></div>
     </div>
 
+    <div class="msg" id="mixNote"></div>
     <div class="card">
       <div class="trip">
         <div><b id="sKm">0.0</b><span>km</span></div>
@@ -163,8 +167,15 @@ nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:re
   <section class="wrap" id="v-plein" hidden>
     <h2>Plein & calibration</h2>
     <div class="card">
+      <label>Carburant dans le réservoir</label>
+      <div class="seg" id="fuelSeg">
+        <button class="btn" data-f="E85">E85</button><button class="btn" data-f="MIX">Mélange E85 + SP</button>
+        <button class="btn" data-f="SP95">SP95-E10</button><button class="btn" data-f="SP98">SP98</button>
+      </div>
       <label for="iLitres">Litres affichés sur la pompe (plein fait à ras)</label>
       <input type="text" id="iLitres" inputmode="decimal" autocomplete="off" placeholder="38,50">
+      <label for="iPrix">Prix au litre en € (facultatif)</label>
+      <input type="text" id="iPrix" inputmode="decimal" autocomplete="off" placeholder="0,79">
       <button class="btn main" id="bPlein">Enregistrer le plein</button>
       <div class="msg" id="pleinMsg"></div>
     </div>
@@ -199,13 +210,21 @@ nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:re
 <script>
 "use strict";
 /* ───────── Moteur K4J 1.4 16v ───────── */
-const K4J={cyl:1.390, ve:0.80, afr:14.7, afrFull:12.8, dens:745, R:287.05, rouge:6250};
+const K4J={cyl:1.390, ve:0.80, lambdaFull:0.87, R:287.05, rouge:6250};
+// afr = rapport air/carburant stœchiométrique, d = densité en g/L
+const FUELS={
+  E85:{n:"E85",afr:9.8,d:785},
+  MIX:{n:"Mélange E85 + SP",afr:11.8,d:767},
+  SP95:{n:"SP95-E10",afr:14.1,d:750},
+  SP98:{n:"SP98",afr:14.5,d:745}
+};
+const fuel=()=>FUELS[S.carbu]||FUELS.E85;
 
 /* ───────── Stockage ───────── */
 const KEY="clioK4J.v1";
 function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.facteur)return s}catch(e){}
-  return{facteur:1,litresCalc:0,km:0,pleins:[],trajets:[]}}
-let S=load();
+  return{facteur:1,litresCalc:0,km:0,pleins:[],trajets:[],carbu:"E85"}}
+let S=load();if(!S.carbu)S.carbu="E85";
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){msg("Impossible d'enregistrer dans ce navigateur (stockage plein ou bloqué).",true)}}
 
 /* ───────── UI helpers ───────── */
@@ -234,7 +253,14 @@ class BleTransport{
     step="choix du boîtier";log("Bluetooth dispo, ouverture de la liste…");
     this.dev=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:SERVICES});
     log("Choisi : "+(this.dev.name||"(sans nom)"));
-    try{this.dev.addEventListener("gattserverdisconnected",()=>onDisconnect())}catch(e){}
+    try{this.dev.addEventListener("gattserverdisconnected",()=>{log("Bluetooth coupé");onDisconnect()})}catch(e){}
+    this.onText=onText;
+    await this.setup();
+    return this.dev.name||"OBDBLE";
+  }
+  reconnect(){return this.setup()}
+  async setup(){
+    const onText=this.onText;
     step="connexion Bluetooth";
     let srv=null;
     for(let i=1;i<=3&&!srv;i++){
@@ -264,7 +290,6 @@ class BleTransport{
     notif.addEventListener("characteristicvaluechanged",e=>{const t=dec.decode(e.target.value);log("← "+t.replace(/\r/g,"⏎"));onText(t)});
     await notif.startNotifications();
     log("Prêt.");
-    return this.dev.name||"OBDBLE";
   }
   async write(t){
     const b=enc.encode(t);
@@ -359,10 +384,9 @@ function debitLh(d){
   if(papRel!=null&&papRel<1.5&&d.rpm>1300&&(d.vit||0)>15&&d.map<35)return 0; // coupure d'injection
   const tk=(d.air??20)+273.15;
   const airGs=d.map*1000*(K4J.cyl/1000)*(d.rpm/120)*K4J.ve/(K4J.R*tk)*1000;
-  const full=papRel!=null&&papRel>=70;
-  let ess=airGs/(full?K4J.afrFull:K4J.afr);
-  if(!full)ess*=1+((d.stft||0)+(d.ltft||0))/100;
-  return ess*3600/K4J.dens*S.facteur;
+  const full=papRel!=null&&papRel>=70, f=fuel();
+  const carbGs=airGs/(f.afr*(full?K4J.lambdaFull:1));
+  return carbGs*3600/f.d*S.facteur;
 }
 
 /* ───────── Boucle de lecture ───────── */
@@ -394,7 +418,29 @@ async function connect(useDemo){
   }
 }
 function reset(){$("bConnect").disabled=$("bDemo").disabled=false;$("connRow").hidden=false;$("bStop").disabled=true}
-function onDisconnect(){if(running){running=false;endTrip();pill("err","Coupé");msg("Liaison perdue. Le trajet a été enregistré jusque-là.",true);reset()}}
+let reconnecting=false;
+function onDisconnect(){
+  if(!running||reconnecting)return;
+  running=false;
+  if(demo||!T||!T.reconnect){endTrip();pill("err","Coupé");msg("Liaison perdue. Le trajet a été enregistré jusque-là.",true);reset();return}
+  reconnecting=true;waiter=null;
+  pill("busy","Reconnexion…");
+  msg("Liaison coupée (app en arrière-plan ou écran verrouillé ?). Reviens sur cette page : je me reconnecte tout seul et le trajet continue.");
+  tryReconnect();
+}
+async function tryReconnect(){
+  const t0=Date.now();
+  while(reconnecting){
+    if(document.visibilityState==="visible"){
+      try{
+        await T.reconnect();step="dialogue avec la voiture";
+        if(await initElm()){reconnecting=false;pill("on","Connecté");msg("Reconnecté. Le trajet continue.");startWake();loop();return}
+      }catch(e){log("Reconnexion : "+errTxt(e))}
+    }
+    if(Date.now()-t0>15*60000){reconnecting=false;endTrip();pill("err","Coupé");msg("Pas de reconnexion depuis 15 min : trajet enregistré.",true);reset();return}
+    await new Promise(r=>setTimeout(r,3000));
+  }
+}
 
 async function loop(){
   running=true;let n=0,prev=performance.now(),bat=null;
@@ -414,9 +460,10 @@ async function loop(){
 }
 
 /* ───────── Trajet ───────── */
-function startTrip(){trip={debut:Date.now(),km:0,litres:0,maxRpm:0,maxEau:0,demo,pts:[],lastPt:0};papMin=100}
+function startTrip(){trip={debut:Date.now(),km:0,litres:0,maxRpm:0,maxEau:0,demo,pts:[],lastPt:0,trou:0};papMin=100}
 function tick(dt){
-  if(!trip||dt>5)return;
+  if(!trip)return;
+  if(dt>5){trip.trou+=dt;return}
   const v=D.vit||0;trip.km+=v*dt/3600;trip.litres+=D.lh*dt/3600;
   trip.maxRpm=Math.max(trip.maxRpm,D.rpm||0);trip.maxEau=Math.max(trip.maxEau,D.eau||0);
   const t=Date.now();
@@ -431,10 +478,11 @@ function endTrip(){
   const rec={debut:t.debut,fin:Date.now(),km:+t.km.toFixed(2),litres:+t.litres.toFixed(3),maxRpm:Math.round(t.maxRpm),maxEau:Math.round(t.maxEau),demo:t.demo,pts:t.pts};
   S.trajets.unshift(rec);
   while(S.trajets.length>15)S.trajets.pop();
-  if(!t.demo){S.km+=t.km;S.litresCalc+=t.litres}
+  rec.trou=Math.round(t.trou);rec.carbu=S.carbu;
+  if(!t.demo){S.km+=t.km;S.litresCalc+=t.litres;if(t.trou>120)S.incomplet=true}
   save();
 }
-$("bStop").onclick=()=>{running=false;endTrip();T&&T.close();pill("","Déconnecté");msg("Trajet enregistré. Il est dans l'onglet Trajets.");reset()};
+$("bStop").onclick=()=>{running=false;reconnecting=false;endTrip();T&&T.close();pill("","Déconnecté");msg("Trajet enregistré. Il est dans l'onglet Trajets.");reset()};
 $("bConnect").onclick=()=>connect(false);
 $("bDemo").onclick=()=>connect(true);
 
@@ -452,6 +500,14 @@ function render(){
   $("tStft").textContent=fx(D.stft,1);$("tLtft").textContent=fx(D.ltft,1);$("tLh").textContent=fx(D.lh,2);
   $("tileEau").className="tile"+(D.eau>105?" bad":D.eau>98?" warn":"");
   $("tileBat").className="tile"+(D.bat!=null&&(D.bat<12.2||D.bat>14.8)?" warn":"");
+  const eth=S.carbu==="E85"||S.carbu==="MIX",lt=D.ltft,chaud=D.eau!=null&&D.eau>=75;
+  $("tileLtft").className="tile"+(lt!=null&&chaud&&Math.abs(lt)>15?" bad":lt!=null&&chaud&&Math.abs(lt)>8?" warn":"");
+  let note="";
+  if(lt!=null&&!chaud)note="Richesse : attends que l'eau dépasse 75 °C pour juger.";
+  else if(lt!=null&&lt>8)note=`Mélange trop pauvre : le calculateur ajoute ${lt.toFixed(0)} % de carburant.`+(eth?" Le kit éthanol n'en injecte pas assez : monte un peu son réglage.":" Cherche une prise d'air ou un injecteur encrassé.");
+  else if(lt!=null&&lt<-8)note=`Mélange trop riche : le calculateur retire ${(-lt).toFixed(0)} % de carburant.`+(eth?" Le kit éthanol en injecte trop : baisse un peu son réglage.":"");
+  else if(lt!=null)note=`Richesse bien réglée (correction longue ${lt>0?"+":""}${lt.toFixed(1)} %).`;
+  $("mixNote").textContent=note;
   if(trip){$("sKm").textContent=trip.km.toFixed(1);$("sL").textContent=trip.litres.toFixed(2);
     const s=Math.round((Date.now()-trip.debut)/1000);$("sT").textContent=Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
     $("sMax").textContent=Math.round(trip.maxRpm)}
@@ -507,33 +563,42 @@ $("bPlein").onclick=()=>{
   const L=parseFloat(String($("iLitres").value).replace(",","."));const out=$("pleinMsg");
   if(!(L>0&&L<60)){out.textContent="Entre les litres affichés sur la pompe (entre 1 et 60).";return}
   const date=new Date().toISOString();
-  if(S.km<1){S.pleins.unshift({date,litres:L,depart:true});save();$("iLitres").value="";
+  const prix=parseFloat(String($("iPrix").value).replace(",","."));const px=prix>0.2&&prix<4?prix:null;
+  if(S.km<1){S.pleins.unshift({date,litres:L,depart:true,carbu:S.carbu,prix:px});S.incomplet=false;save();$("iLitres").value="";
     out.textContent="Point de départ enregistré. Enregistre tous tes trajets jusqu'au prochain plein à ras.";renderPleins();return}
   const reel=L/S.km*100,calc=S.litresCalc/S.km*100,ratio=S.litresCalc>0?L/S.litresCalc:1;
-  let note;const calibre=S.km>=80&&ratio>0.6&&ratio<1.6;
+  let note;const calibre=S.km>=80&&ratio>0.6&&ratio<1.6&&!S.incomplet;
   if(S.km<80)note="Moins de 80 km : trop court pour calibrer, conso notée.";
+  else if(S.incomplet)note="Un trajet a eu des coupures d'enregistrement : calibration ignorée pour ce plein.";
   else if(!calibre)note=`Écart trop grand (×${ratio.toFixed(2)}) : un trajet n'a sûrement pas été enregistré. Calibration ignorée.`;
   else{const n=S.pleins.filter(p=>p.calibre).length,w=n===0?1:.5,old=S.facteur;S.facteur=+(old*(1-w+w*ratio)).toFixed(4);
     note=`Calibration ajustée : ${old.toFixed(3)} → ${S.facteur.toFixed(3)}.`}
-  S.pleins.unshift({date,litres:L,km:+S.km.toFixed(1),reel:+reel.toFixed(2),calc:+calc.toFixed(2),calibre});
-  S.km=0;S.litresCalc=0;save();$("iLitres").value="";
-  out.textContent=`${reel.toFixed(1)} L/100 réels sur ce plein (calculé : ${calc.toFixed(1)}). ${note}`;renderPleins();
+  S.pleins.unshift({date,litres:L,km:+S.km.toFixed(1),reel:+reel.toFixed(2),calc:+calc.toFixed(2),calibre,carbu:S.carbu,prix:px});
+  S.km=0;S.litresCalc=0;S.incomplet=false;save();$("iLitres").value="";$("iPrix").value="";
+  out.textContent=`${reel.toFixed(1)} L/100 réels sur ce plein (calculé : ${calc.toFixed(1)})${px?`, soit ${(reel*px).toFixed(2)} €/100 km`:""}. ${note}`;renderPleins();
 };
+function renderFuel(){
+  document.querySelectorAll("#fuelSeg .btn").forEach(b=>b.classList.toggle("on",b.dataset.f===S.carbu));
+  $("fuelTag").textContent="1.4 16V · "+fuel().n;
+}
+document.querySelectorAll("#fuelSeg .btn").forEach(b=>b.onclick=()=>{S.carbu=b.dataset.f;save();renderFuel()});
 function renderPleins(){
+  renderFuel();
   const vrais=S.pleins.filter(p=>p.reel);
   const moy=vrais.length?vrais.reduce((a,p)=>a+p.litres,0)/vrais.reduce((a,p)=>a+p.km,0)*100:null;
   $("calib").innerHTML=`<span>Conso moyenne réelle</span><b>${moy?moy.toFixed(1)+" L/100":"après 2 pleins"}</b>
     <span>Depuis le dernier plein</span><b>${S.km.toFixed(0)} km · ${S.litresCalc.toFixed(1)} L</b>
-    <span>Facteur de calibration</span><b>${S.facteur.toFixed(3)}</b>`;
+    <span>Facteur de calibration</span><b>${S.facteur.toFixed(3)}</b>
+    ${(()=>{const p=vrais.find(x=>x.prix);return p?`<span>Coût au dernier plein</span><b>${(p.reel*p.prix).toFixed(2)} €/100 km</b>`:""})()}`;
   $("pleinList").innerHTML=S.pleins.slice(0,10).map(p=>`<div class="it"><span>${new Date(p.date).toLocaleDateString("fr-FR")} · ${p.litres.toFixed(2)} L</span>
-    <b>${p.reel?p.reel.toFixed(1):"départ"}</b><small>${p.reel?`${p.km.toFixed(0)} km · calculé ${p.calc.toFixed(1)}${p.calibre?"":" · non calibré"}`:"premier plein"}</small><small>${p.reel?"L/100":""}</small></div>`).join("");
+    <b>${p.reel?p.reel.toFixed(1):"départ"}</b><small>${p.carbu?FUELS[p.carbu].n+" · ":""}${p.reel?`${p.km.toFixed(0)} km · calculé ${p.calc.toFixed(1)}${p.calibre?"":" · non calibré"}`:"premier plein"}</small><small>${p.reel?"L/100":""}</small></div>`).join("");
 }
 
 /* ───────── Trajets ───────── */
 function renderTrajets(){
   $("tripList").innerHTML=S.trajets.length?S.trajets.map((t,i)=>{const d=new Date(t.debut),min=Math.round((t.fin-t.debut)/60000);
     return`<button class="it" data-i="${i}"><span>${d.toLocaleDateString("fr-FR")} ${d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})} · ${min} min${t.demo?" · démo":""}</span>
-    <b>${t.km>0.3?(t.litres/t.km*100).toFixed(1):"--"}</b><small>${t.km.toFixed(1)} km · ${t.litres.toFixed(2)} L · ${t.maxRpm} tr/min max</small><small>L/100</small></button>`}).join("")
+    <b>${t.km>0.3?(t.litres/t.km*100).toFixed(1):"--"}</b><small>${t.km.toFixed(1)} km · ${t.litres.toFixed(2)} L · ${t.maxRpm} tr/min max${t.carbu?" · "+FUELS[t.carbu].n:""}${t.trou>60?` · ${Math.round(t.trou/60)} min non enregistrées`:""}</small><small>L/100</small></button>`}).join("")
     :'<div class="msg">Aucun trajet pour l\'instant. Connecte le boîtier et roule, ou essaie le mode démo.</div>';
   document.querySelectorAll("#tripList .it").forEach(b=>b.onclick=()=>showTrip(+b.dataset.i));
 }
@@ -581,6 +646,7 @@ $("bRestore").onclick=()=>$("fRestore").click();
 $("fRestore").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
   r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.facteur||!Array.isArray(d.pleins))throw 0;S=d;save();renderTrajets();$("backupMsg").textContent="Sauvegarde importée."}
     catch(_){$("backupMsg").textContent="Ce fichier n'est pas une sauvegarde de cette app."}};r.readAsText(f)};
+renderFuel();
 </script>
 </body>
 </html>
